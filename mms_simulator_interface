@@ -1,0 +1,161 @@
+import API
+import sys
+
+# =====================================================
+# 1. NAVIGATION & GRAPH LOGIC (RETAINED)
+# =====================================================
+class MazeGrid:
+    def __init__(self, width=16, height=16):
+        self.width = width
+
+        self.height = height
+        
+        # Initialize walls: True = Wall, False = No Wall // is there a wall? the boolean is the answer
+        
+        # This is a nested dictionary
+        # A dictionary is a special data type in python that assigns a single variable with one or more key:value pairs. 
+        self.walls = {(x, y): {'N': False, 'E': False, 'S': False, 'W': False} 
+                      for x in range(width) for y in range(height)}
+    
+        self.dist = {(x, y): 255 for x in range(width) for y in range(height)}
+         #  ^^^ This line follows the Dijkstra path finding algorithm and sets the distance from the start cell and of each cell of the maze to infinity or 255 in this case.  
+
+        self.goals = [(7, 7), (7, 8), (8, 7), (8, 8)] #length of this list  is 4 
+
+    def update_wall(self, x, y, direction, exists):
+        if self.walls[(x, y)][direction] == exists:
+            return # No change
+        
+        self.walls[(x, y)][direction] = exists
+        # Visual feedback in the simulator
+        if exists:
+            API.setWall(x, y, direction.lower())
+        
+        # Mirroring to the adjacent cell
+        next_x, next_y = x, y
+        opposite = {'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E'}
+        if direction == 'N': next_y += 1
+        elif direction == 'S': next_y -= 1
+        elif direction == 'E': next_x += 1
+        elif direction == 'W': next_x -= 1
+        
+        if 0 <= next_x < self.width and 0 <= next_y < self.height:
+            self.walls[(next_x, next_y)][opposite[direction]] = exists
+
+    def flood_fill(self):
+        """Standard Flood Fill to calculate distances to goal."""
+        for cell in self.dist: self.dist[cell] = 255
+        #This line follows the Dijkstra path finding algorithm and sets the distance from the start cell of each cell of the maze to infinity or 255 in this case.  
+        for g in self.goals: self.dist[g] = 0
+        # This line does similarly by setting the distance of the goals to zero.
+        changed = True
+        while changed:
+            changed = False
+            for x in range(self.width):
+                for y in range(self.height):
+                    if (x, y) in self.goals: continue
+                    
+                    min_dist = 255
+                    for d, is_wall in self.walls[(x, y)].items(): # 'd' as in direction. Character for each of the 4 cardinal directions
+                        if not is_wall:
+                            next_x, next_y = x, y
+                            if d == 'N': next_y += 1
+                            elif d == 'S': next_y -= 1
+                            elif d == 'E': next_x += 1
+                            elif d == 'W': next_x -= 1
+                            
+                            if 0 <= next_x < self.width and 0 <= next_y < self.height: # is next x and y in the grid?
+                                min_dist = min(min_dist, self.dist[(next_x, next_y)] + 1) # assign lowest value btw 255 and current distance to min dist 
+                    
+                    if self.dist[(x, y)] != min_dist:
+                        self.dist[(x, y)] = min_dist
+                        # Show distances in the simulator for debugging
+                        API.setText(x, y, str(min_dist))
+                        changed = True
+
+# =====================================================
+# 2. SIMULATOR BRIDGE & MOVEMENT
+# =====================================================
+def log(message):
+    """MMS requires logging to stderr."""
+    print(message, file=sys.stderr)
+
+def main():
+    maze = MazeGrid()
+    x, y = 0, 0
+    heading = 0 # 0:N, 1:E, 2:S, 3:W
+    directions = ['N', 'E', 'S', 'W']
+
+    while True:
+        # 1. READ SENSORS & UPDATE WALLS
+        # Map relative sensor data to absolute maze directions
+        f_dir = directions[heading]
+        r_dir = directions[(heading + 1) % 4]
+        l_dir = directions[(heading - 1) % 4]
+
+        maze.update_wall(x, y, f_dir, API.wallFront()) # This would be where sensor readings would be assessed
+        """
+        is_wall = false
+        if anext_y(sensor) < x 
+            set wall = true
+        """
+        maze.update_wall(x, y, r_dir, API.wallRight())
+        
+        maze.update_wall(x, y, l_dir, API.wallLeft())
+
+        # 2. RUN ALGORITHM
+        maze.flood_fill()
+
+        # 3. CHECK IF GOAL REACHED
+        if (x, y) in maze.goals:
+            log("Goal Reached!")
+            API.setColor(x, y, 'G')
+            break
+
+        # 4. DECIDE NEXT MOVE
+        # Find the neighbor with the lowest flood-fill value
+        best_dir = None
+        min_val = maze.dist[(x, y)] #255 at first for every cell before flood fill. After flood fill, depending on the maze min_val changes.
+
+        for i in range(4):
+            d = directions[i]
+            if not maze.walls[(x, y)][d]: # d => direction NESW
+                next_x, next_y = x, y
+                if d == 'N': next_y += 1
+                elif d == 'S': next_y -= 1
+                elif d == 'E': next_x += 1
+                elif d == 'W': next_x -= 1
+                
+                if 0 <= next_x < 16 and 0 <= next_y < 16:
+                    if maze.dist[(next_x, next_y)] < min_val:
+                        min_val = maze.dist[(next_x, next_y)]
+                        best_dir = i
+
+        # 5. EXECUTE MOVEMENT
+        if best_dir is not None:
+            # Turn logic
+            while heading != best_dir:
+                # Decide shortest turn
+                diff = (best_dir - heading + 4) % 4
+                if diff == 1:
+                    API.turnRight()
+                    heading = (heading + 1) % 4
+                elif diff == 3: # NOTICE  3 and 1 are the primes that make up 4 
+                    API.turnLeft()
+                    heading = (heading - 1) % 4
+                else: # 180 degree turn
+                    API.turnRight()
+                    heading = (heading + 1) % 4
+
+            # Move Forward
+            API.moveForward()
+            if heading == 0: y += 1
+            elif heading == 1: x += 1
+            elif heading == 2: y -= 1
+            elif heading == 3: x -= 1
+        else:
+            log("Error: No valid path found!")
+            break
+
+if __name__ == "__main__":
+    main()
