@@ -24,12 +24,13 @@ These are the rules for the IEEE micro mouse competition:
 
 ### Mouse
 The following are not allowed: 
-Remote control.
-Combustion engines.
-Damaging, flying, jumping, climbing, marking the walls of the maze.
-A Mouse larger than 25 cm in width or length
-Change the code of the robot once maze is shown during competition
-Maze
+` - Remote control.
+` - Combustion engines.
+` - Damaging, flying, jumping, climbing, marking the walls of the maze.
+` - A Mouse larger than 25 cm in width or length
+` - Change the code of the robot once maze is shown during competition
+
+### Maze
 The maze is a 16x16 grid made of 18x18 (cm) squares. 
 It has inside walls 5 (cm) high and 1.2 (cm) wide. 
 The maze is built in such a way that robots that just follow walls cannot solve it. 
