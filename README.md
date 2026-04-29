@@ -1,14 +1,14 @@
 # micromouseproject FDU
 
 Micromouse Project Repository for FDU
-#READ ME
+# READ ME
 
-##Intro 
+## Intro 
 Hello and welcome!
 This is an info page for the Micromouse project. The purpose of the project is to build a robot capable of solving a maze as fast as possible.
 The skills needed for this project are used in Robotics, System Engineering, Computer Programming, and Hardware Design among others.
 
-##A Summary of our Design
+## A Summary of our Design
 
 Making a micro mouse requires two parts: hardware and software. 
 Hardware
@@ -18,11 +18,11 @@ Computing: Raspberry Pi 5
 Software: Python
 
 
-##Summary of the MicroMouse Competition Rules
+## Summary of the MicroMouse Competition Rules
 
 These are the rules for the IEEE micro mouse competition:
 
-###Mouse
+### Mouse
 The following are not allowed: 
 Remote control.
 Combustion engines.
@@ -35,11 +35,11 @@ It has inside walls 5 (cm) high and 1.2 (cm) wide.
 The maze is built in such a way that robots that just follow walls cannot solve it. 
 This forces us to use a refined approach .
 
-###Teams
+### Teams
 Teams are made of 5 people and cannot have more than two graduate students. 
 Each team can use at most 3 robot designs but they cannot be exactly the same.
 
-###Competition
+### Competition
 Each robot starts in one of the four corners of the maze.  
 The start cell is defined as a cell with a wall on 3 sides [1]. 
 Teams are given 10min in total to solve the maze. 
