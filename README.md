@@ -42,12 +42,21 @@ Each team can use at most 3 robot designs but they cannot be exactly the same.
 
 ### Competition
 Each robot starts in one of the four corners of the maze.  
+
 The start cell is defined as a cell with a wall on 3 sides [1]. 
+
 Teams are given 10min in total to solve the maze. 
+
 A run starts when the robot crosses the startline and finishes when the robot crosses the entrance to the goal or when a participant touches it. 
+
 The goal is located at the center of the maze and only has one entrance.
+
 During the 10 minutes, teams can do multiple runs. 
+
 A run is aborted by physically touching the mouse. 
+
 Touching the mouse results in a 30 second malus. 
+
 When a run is aborted the robot must re-start from the starting cell. 
+
 The team with the shortest run time wins.
