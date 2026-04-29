@@ -370,7 +370,7 @@ def main():
                     distances.append(None)
                     print(f"Read error S{idx+1}: {e}")
             
-            def LS_trigger(self, distances):
+            #def LS_trigger(self, distances):
                 # checks if sensor distance reading is within a certain threshold and returns a boolean
                 """is_close = False
                 threshold = 53; # about 53mm. Mouse Chassis is 5" and cells are 18cm^2
@@ -385,7 +385,7 @@ def main():
             
 
 
-            maze.update_wall(x,y,f_dir,LS_trigger())    
+            #maze.update_wall(x,y,f_dir,LS_trigger())    
 
             # --- FSM ---
             if current_state == S_WAIT_SIGNAL:
