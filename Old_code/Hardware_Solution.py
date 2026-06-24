@@ -1,0 +1,467 @@
+#!/usr/bin/env python3
+import time
+import math
+import sys
+import board
+import digitalio
+from gpiozero import PWMOutputDevice, DigitalOutputDevice, RotaryEncoder
+import adafruit_extended_bus
+import adafruit_vl53l0x
+import adafruit_lsm6ds.lsm6dsox
+import adafruit_lis3mdl
+
+
+#Global Variables 
+xshut_pins = [board.D27, board.D22, board.D17]  # left, front, right
+target_addresses = [0x30, 0x31, 0x32]           # left, front, right
+PWMA_PIN = 12
+PWMB_PIN = 13
+AIN1_PIN, AIN2_PIN = 15, 14
+BIN1_PIN, BIN2_PIN = 16, 25
+STBY_PIN = 18
+pwmA = PWMOutputDevice(PWMA_PIN, frequency=1000, initial_value=0.0)
+pwmB = PWMOutputDevice(PWMB_PIN, frequency=1000, initial_value=0.0)
+AIN1 = DigitalOutputDevice(AIN1_PIN, initial_value=False)
+AIN2 = DigitalOutputDevice(AIN2_PIN, initial_value=False)
+BIN1 = DigitalOutputDevice(BIN1_PIN, initial_value=False)
+BIN2 = DigitalOutputDevice(BIN2_PIN, initial_value=False)
+STBY = DigitalOutputDevice(STBY_PIN, initial_value=False)
+i2c = adafruit_extended_bus.ExtendedI2C(3)
+
+
+# =====================================================
+# 1. Navigation and Graph Logic Dijkstra and Flood-fill)
+# =====================================================
+class MazeGrid:
+    def __init__(self, width=16, height=16):
+        self.width, self.height = width, height
+        self.walls = {(x, y): {'N': False, 'E': False, 'S': False, 'W': False} 
+                      for x in range(width) for y in range(height)}
+        self.dist = {(x, y): 255 for x in range(width) for y in range(height)}
+        self.goals = [(7, 7), (7, 8), (8, 7), (8, 8)]
+        
+
+    def update_wall(self, x, y, direction, exists):
+        self.walls[(x, y)][direction] = exists
+        # Mirroring: If (0,0) has N wall, (0,1) has S wall
+        nx, ny = x, y
+        opposite = {'N': 'S', 'S': 'N', 'E': 'W', 'W': 'E'}
+        if direction == 'N': ny += 1
+        elif direction == 'S': ny -= 1
+        elif direction == 'E': nx += 1
+        elif direction == 'W': nx -= 1
+        if 0 <= nx < self.width and 0 <= ny < self.height:
+            self.walls[(nx, ny)][opposite[direction]] = exists
+
+    def flood_fill(self):
+        """Flood-fill Dijkstra: Calculates pathing weights to goals."""
+        for cell in self.dist: self.dist[cell] = 255
+        for g in self.goals: self.dist[g] = 0
+        
+        changed = True
+        while changed:
+            changed = False
+            for x in range(self.width):
+                for y in range(self.height):
+                    if (x, y) in self.goals: continue
+                    min_dist = 255
+                    for d, is_wall in self.walls[(x, y)].items():
+                        if not is_wall:
+                            nx, ny = x, y
+                            if d == 'N': ny += 1
+                            elif d == 'S': ny -= 1
+                            elif d == 'E': nx += 1
+                            elif d == 'W': nx -= 1
+                            if 0 <= nx < self.width and 0 <= ny < self.height:
+                                min_dist = min(min_dist, self.dist[(nx, ny)] + 1)
+                    if self.dist[(x, y)] != min_dist:
+                        self.dist[(x, y)] = min_dist
+                        changed = True
+
+# =====================================================
+# 2. PID Controller
+# =====================================================
+class PIDController:
+    def __init__(self, kp, ki, kd, setpoint=0, limit=50):
+        self.kp, self.ki, self.kd = kp, ki, kd
+        self.setpoint = setpoint
+        self.prev_error = 0
+        self.integral = 0
+        self.limit = limit
+
+    def update(self, measurement, dt):
+        if dt <= 0: return 0
+        error = self.setpoint - measurement
+        self.integral += error * dt
+        # Simple anti-windup
+        self.integral = max(-20, min(20, self.integral))
+        d_term = (error - self.prev_error) / dt
+        self.prev_error = error
+        output = (self.kp * error) + (self.ki * self.integral) + (self.kd * d_term)
+        return max(-self.limit, min(self.limit, output))
+
+# =====================================================
+# 3. HARDWARE 
+# =====================================================
+
+def scan_hex():
+        return [hex(x) for x in i2c.scan()]
+def set_motors(self, left, right):
+            self.AIN1.value = left > 0; self.AIN2.value = left < 0
+            self.BIN1.value = right > 0; self.BIN2.value = right < 0
+            self.PWMA.value = abs(left) / 100.0; self.PWMB.value = abs(right) / 100.0
+def set_motor_direction(l, r):
+        """
+        l, r: "F" (forward) or "R" (reverse) or "S" (stop/coast)
+        TB6612 truth table:
+        Forward: IN1=1 IN2=0
+        Reverse: IN1=0 IN2=1
+        Coast:   IN1=0 IN2=0
+        Brake:   IN1=1 IN2=1
+        """
+        # Left motor (A channel)
+        if l == "F":
+            AIN1.on();  AIN2.off()
+        elif l == "R":
+            AIN1.off(); AIN2.on()
+        else:  # "S"
+            AIN1.off(); AIN2.off()
+
+        # Right motor (B channel)
+        if r == "F":
+            BIN1.on();  BIN2.off()
+        elif r == "R":
+            BIN1.off(); BIN2.on()
+        else:  # "S"
+            BIN1.off(); BIN2.off()     
+def set_motor_power(lp, rp):
+        """
+        lp, rp are duty cycle percentages 0–100.
+        gpiozero PWMOutputDevice.value expects 0.0–1.0.
+        """
+        lp = max(0.0, min(100.0, float(lp))) / 100.0
+        rp = max(0.0, min(100.0, float(rp))) / 100.0
+        pwmA.value = lp
+        pwmB.value = rp
+def stop_motors():
+        set_motor_power(0, 0)
+        set_motor_direction("S", "S")
+
+
+        
+class RobotHardware:
+    # Sensor mapping 
+    # XSHUT pin mapping for sensors (BCM)
+    def __init__(self, i2c_bus):
+        # Motor Driver / Motors 
+        self.PWMA = PWMOutputDevice(12)
+        self.PWMB = PWMOutputDevice(13)
+        self.AIN1 = DigitalOutputDevice(15)
+        self.AIN2 = DigitalOutputDevice(14)
+        self.BIN1 = DigitalOutputDevice(16)
+        self.BIN2 = DigitalOutputDevice(25)
+        self.STBY = DigitalOutputDevice(18)
+
+        #encoders
+        self.enc_l = RotaryEncoder(17, 27, max_steps=0)
+        self.enc_r = RotaryEncoder(22, 23, max_steps=0)
+        
+        # Sensors
+        self.imu = adafruit_lsm6ds.lsm6dsox.LSM6DSOX(i2c_bus, address=0x6B)
+        self.STBY.on()
+    def check_stall(self, current_pwr):
+            """Cross-verification: High power + Zero encoder delta = Stall."""
+            if abs(current_pwr) > 40 and self.enc_l.steps == 0:
+                return True
+            return False
+    def map_and_initialize_vl53(retries_per_sensor=5, boot_delay=0.20, address_commit_delay=0.10):
+        xshuts = []
+        sensors = []
+
+        # Prepare XSHUTs and hold all sensors in reset (LOW)
+        for pin in xshut_pins:
+            p = digitalio.DigitalInOut(pin)
+            p.direction = digitalio.Direction.OUTPUT
+            p.value = False
+            xshuts.append(p)
+        time.sleep(0.10)
+
+        # Optional: mapping (single-enable scan)
+        print("\n=== Per-sensor single-enable scan ===\n")
+        for i, pin in enumerate(xshut_pins):
+            for p in xshuts:
+                p.value = False
+            time.sleep(0.02)
+            xshuts[i].value = True
+            time.sleep(boot_delay)
+            print(f"S{i+1} XSHUT={pin} bus:", scan_hex())
+
+        # Sequential addressing with retries and verification
+        print("\n=== Sequential addressing (FIXED) ===\n")
+        for i, addr in enumerate(target_addresses):
+            print(f"\nAddressing S{i+1} -> {hex(addr)}")
+
+            # Keep previously addressed sensors ON (0..i), keep future sensors OFF (i+1..)
+            # This prevents already-addressed sensors from resetting back to 0x29.
+            for j, p in enumerate(xshuts):
+                p.value = (j <= i)
+            time.sleep(boot_delay)
+
+            success = False
+            for attempt in range(1, retries_per_sensor + 1):
+                before = i2c.scan()
+                print(f"[S{i+1} try {attempt}] before: {[hex(d) for d in before]}")
+
+                # At this moment, ONLY the current sensor should be at 0x29
+                if 0x29 not in before:
+                    print("⚠ 0x29 not present; toggling current sensor and retrying")
+                    xshuts[i].value = False
+                    time.sleep(0.05)
+                    xshuts[i].value = True
+                    time.sleep(boot_delay)
+                    continue
+
+                try:
+                    # Create driver at default address (0x29)
+                    vl = adafruit_vl53l0x.VL53L0X(i2c)
+                    time.sleep(0.02)
+
+                    # Change its address
+                    vl.set_address(addr)
+                    time.sleep(address_commit_delay)
+
+                    after = i2c.scan()
+                    print(f"           after: {[hex(d) for d in after]}")
+
+                    if addr in after:
+                        sensors.append(vl)
+                        print(f"✅ S{i+1} now at {hex(addr)}")
+                        success = True
+                        break
+                    else:
+                        print("⚠ Address not visible after set_address; retrying…")
+
+                except Exception as e:
+                    print(f"⚠ Exception while addressing S{i+1}: {e}")
+
+                # Retry: toggle ONLY this sensor (do NOT toggle earlier sensors)
+                xshuts[i].value = False
+                time.sleep(0.05)
+                xshuts[i].value = True
+                time.sleep(boot_delay)
+
+            if not success:
+                print(f"🚫 Sensor S{i+1} failed after {retries_per_sensor} attempts")
+                return None
+
+        # Turn all sensors ON (do NOT reset them)
+        for p in xshuts:
+            p.value = True
+        time.sleep(0.10)
+
+        print("\nFinal bus:", scan_hex())
+
+        # Optional: verify all target addresses present
+        final = set(i2c.scan())
+        for addr in target_addresses:
+            if addr not in final:
+                print(f"❌ Missing {hex(addr)} on final scan — sensor reset/glitched")
+                return None
+
+        return sensors
+    def init_imu_and_mag():
+            imu = None
+            mag = None
+            try:
+                imu = adafruit_lsm6ds.lsm6dsox.LSM6DSOX(i2c, address=0x6B)
+                print("✅ LSM6DSOX IMU initialized at 0x6B")
+            except Exception as e:
+                print(f"❌ IMU init failed: {e}")
+                imu = None
+            try:
+                mag = adafruit_lis3mdl.LIS3MDL(i2c, address=0x1E)
+                print("✅ LIS3MDL magnetometer initialized at 0x1E")
+            except Exception as e:
+                print(f"❌ Magnetometer init failed: {e}")
+                mag = None
+            return imu, mag
+    def motor_disable(): 
+        STBY.off()    
+    def turn_left(t, p=25):
+        # left motor reverse, right motor forward (spin left)
+        set_motor_direction("R", "F")
+        set_motor_power(p, p)
+        time.sleep(t)
+        stop_motors()
+    def turn_right(t, p=25):
+        # left motor forward, right motor reverse (spin right)
+        set_motor_direction("F", "R")
+        set_motor_power(p, p)
+        time.sleep(t)
+        stop_motors()
+    def forward(t, p): #p = 25
+        set_motor_direction("F", "F")
+        set_motor_power(p, p)
+        time.sleep(t)
+        stop_motors()
+    def brake():
+        # brake mode: IN1=IN2=1 for both channels
+        AIN1.on(); AIN2.on()
+        BIN1.on(); BIN2.on()
+        set_motor_power(0, 0)
+
+    
+# =====================================================
+# 4. MAIN FSM and LOGIC
+# =====================================================
+def main():
+     # States
+    S_WAIT_SIGNAL = "WAIT_SIGNAL"
+    S_SEARCH      = "SEARCHING"
+    S_ALIGN       = "BACK_ALIGN"
+    S_FAST_RUN    = "FAST_RUN"
+    S_STALL       = "STALL_DETECTED"
+    
+    # Hardware Setup
+    hw = RobotHardware(i2c)
+    pid = PIDController(kp=1.8, ki=0.01, kd=0.1)
+    
+    # Virtual Maze Set-up
+    maze = MazeGrid()
+    directions = ['N','E','S','W']
+    x,y  = 0, 0 
+    heading = 0 # 0:N, 1:E, 2:S, 3:W
+    current_state = S_WAIT_SIGNAL
+    angle = 0.0
+    cells_traveled = 0
+    last_time = time.perf_counter()
+
+    # Sensor Initialization 
+
+    sensorlist = hw.map_and_initialize_vl53()
+    print('Sensors initializing... ') 
+    if sensorlist is None:
+        print("Aborting due to incomplete Vl53 sensor initialization.")
+        safe_shutdown()
+        sys.exit(1)
+
+    try:
+        while True:
+            # Sensor mapping
+            # Map relative sensor data to absolute maze directions
+            f_dir = directions[heading]
+            r_dir = directions[(heading + 1) % 4]
+            l_dir = directions[(heading - 1) % 4]
+
+            #time
+            now = time.perf_counter()
+            dt = now - last_time
+            
+            #Gyroscope
+            gyro_z = hw.imu.gyro[2]
+            angle += gyro_z * dt # Sensor fusion (Gyro integration)
+            
+
+            # Getting Sensor Readings
+            distances = []
+            for idx, s, i in enumerate(sensorlist):
+                try:
+                    d = s.range
+                    distances.append(d)
+                    #print(f"ToF S{idx+1} (addr {hex(target_addresses[idx])}): {d} mm")
+                except Exception as e:
+                    distances.append(None)
+                    print(f"Read error S{idx+1}: {e}")
+            
+            def LS_trigger(self, distances):
+                # checks if sensor distance reading is within a certain threshold and returns a boolean
+                """is_close = False
+                threshold = 53; # about 53mm. Mouse Chassis is 5" and cells are 18cm^2
+                if distances[0] is not None:   
+                    if distances[0]<threshold:
+                        is_close = True
+                        return is_close
+                else:
+                    return False 
+                    except: 
+                        return is_close"""
+            
+
+
+            maze.update_wall(x,y,f_dir,LS_trigger())    
+
+            # --- FSM ---
+            if current_state == S_WAIT_SIGNAL:
+                # HAND SIGNAL: Monitor ToF (Conceptual)
+                # if front_tof < 50mm: state = S_SEARCH
+                hw.set_motors(0, 0)
+                current_state = S_SEARCH # Forcing start for demo
+
+            elif current_state == S_SEARCH:
+                # 1. Drive Forward 1 cell (180mm)
+                # 2. Use back-align every 4-5 cells
+                correction = pid.update(angle, dt)
+                hw.set_motors(30 - correction, 30 + correction)
+                
+                best_dir = None
+                min_val = maze.dist[(x, y)] #255 at first for every cell
+
+
+
+                if hw.check_stall(30):
+                    current_state = S_STALL
+                
+                # If Goal coordinates + Sensor pattern (open space) detected:
+                # state = S_FAST_RUN
+
+            elif current_state == S_ALIGN:
+                # BACK-ALIGN: Mechanical squaring
+                hw.set_motors(-20, -20)
+                time.sleep(0.5)
+                angle = 0 # Reset Yaw
+                hw.enc_l.steps = 0; hw.enc_r.steps = 0
+                current_state = S_SEARCH
+
+            elif current_state == S_FAST_RUN:
+                # DIAGONAL LOGIC: Distance * 1.414
+                # pid.kp = 3.0 (Aggressive)
+                pass
+
+            elif current_state == S_STALL:
+                hw.set_motors(0, 0)
+                print("STALL DETECTED: Manual Reset Required.")
+                break
+
+            last_time = now
+            time.sleep(0.01)
+
+    except KeyboardInterrupt:
+        hw.set_motors(0, 0)
+        hw.STBY.off()
+
+
+def safe_shutdown():
+    """Stop motors, stop PWM (guarded), cleanup GPIO."""
+    try:
+        stop_motors()
+    except Exception:
+        pass
+    try:
+        pwmA.stop()
+    except Exception:
+        pass
+    try:
+        pwmB.stop()
+    except Exception:
+        pass
+    try:
+        GPIO.cleanup()
+    except Exception:
+        pass
+
+if __name__ == "__main__":
+    main()
+
+
+
+

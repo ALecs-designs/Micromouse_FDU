@@ -1,0 +1,33 @@
+# Credentials & Secrets (CRITICAL)
+.env
+secrets.h
+*.key
+*.pem
+
+# Python & Environment
+venv/
+__pycache__/
+*.pyc
+*.pyo
+.pytest_cache/
+
+# C/C++ Build & Object Files
+*.o
+*.obj
+*.out
+*.exe
+*.bin
+*.elf
+*.hex
+*.map
+build/
+dist/
+
+# IDE and OS
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Robotics/Simulator specific
+*.log
+*.sqlite
