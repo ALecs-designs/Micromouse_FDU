@@ -92,26 +92,94 @@ class MazeGrid:  # This class is a virtual, ideal representation of the real maz
                         self.dist[(x, y)] = min_dist
                         API.setText(x, y, str(min_dist))
                         changed = True # confirm the change of minimum distance varable to leave.
-"""
-# All in all step by step here is a summary of the entire algorithm: 
-# 1. Initialize the maze grid and set the starting position and heading of the micromouse.
-# 2. In a loop, read the sensor data to determine the presence of walls in the front, front-right, and front-left directions relative to the current heading. 
-# 3. Update the internal representation of the maze based on the sensor readings.
-# 4. Use the flood-fill algorithm to calculate the distance of each cell to the goal cells based on the current knowledge of the maze.
-# 5. Check if the current cell is a goal cell. If it is, stop the algorithm and declare success.
-# 6. If not at the goal, determine the best direction to move based on the flood-fill values of the neighboring cells that are not blocked by walls.
-# 7. Execute the movement by turning towards the best direction and moving forward one cell.
-# 8. Update the current position and heading of the micromouse based on the executed movement.
-# 9. Repeat the loop until the goal is reached or no valid path is found.
-# 10. Throughout the algorithm, use logging to provide feedback on: 
-# - Sensor readings and wall updates
-# - Distance calculations and flood-fill updates
-# - Movement decisions and executed actions
-# 11. Implement a state machine to manage different states and transitions. 
-# 12. Implement a control algorithm like PID to adjust the speed of the micromouse based on sensor feedback
-# 13. Once at the goal, to return to the starting cell you change the goal cells to be 0. 
-# 14. then ... *(DETAIL)    
-"""
+    def get_shortest_path(self, start=(0,0)):
+        path = [start]
+        curr = start
+        
+        # Directions mapping for coordinate math
+        offsets = {'N': (0, 1), 'S': (0, -1), 'E': (1, 0), 'W': (-1, 0)}
+        
+        while curr not in self.goals:
+            best_neighbor = None
+            min_dist = self.dist[curr]
+            
+            # Look at all 4 directions
+            for d, (dx, dy) in offsets.items():
+                # As long as there is no wall in that direction, 
+                # set the neighbor position coordinates 
+                # equal to the position coordinates of the neighbor cell.
+                if not self.walls[curr][d]: # if there is no wall at the current position and direction set neighbor to current position plus direction offset.
+                    neighbor = (curr[0] + dx, curr[1] + dy)
+                    
+                    # Ensure neighbor coordinate values are valid and 
+                    # have a value lower than the current minimal distance so far.
+                    if 0 <= neighbor[0] < self.width and 0 <= neighbor[1] < self.height:
+                        if self.dist[neighbor] < min_dist:
+                            # if the distance of the neighbor cell's is less than 
+                            # the current minimal distance so far, then set the min_dist equal to it.
+                            min_dist = self.dist[neighbor]
+                            # set the best neighbor equal to it. 
+                            best_neighbor = neighbor
+            
+            # Safety check: if no neighbor is found, we are trapped
+            # because this could mean that their is always a wall 
+            # in between the mouse and the adjacent cells or this means 
+            # There is an issue with the function. 
+            if best_neighbor is None:
+                break
+            # set the "current position" variable equal to the best neighbor.     
+            curr = best_neighbor
+            # add that "current position' to the path array. 
+            path.append(curr)
+        # return the path once one of the goal cells is reached. 
+        # control does not leave the while loop until one of 
+        # the goal cells are reached or until an invalid best_neighbor exists. 
+        # The function thus creates a path (a line in math because it's a collection 
+        # of (x,y) points), which is a list of tuples the mouse must visit.
+        # this function needs to be ran after the flood_fill() not only because
+        # the floodfill() makes sure we get the right distances of each
+        # cell to the goal, and the rigth mapping of walls inside 
+        # the maze but also because the function assumes we know where the walls
+        # especially considering we use optimistic mapping (no walls until proven otherwise by sensors). 
+        return path
+    
+    def smooth(path):
+        smooth_path = []
+        # this array will hold the instructions
+
+        if len(path) >= 3:
+            i = 0       # initialize loop variable
+            while i < len(path) - 2:
+            #for i in range(len(path)-2):
+                curr_x, curr_y  = path[i]
+                next_x, next_y= path[i+1]
+                target_x, target_y = path[i+2]
+                vec_A_dx = next_x - curr_x
+                vec_A_dy = next_y - curr_y
+
+                vec_B_dx = target_x - next_x
+                vec_B_dy = target_y - next_y
+                
+                #vec_c_x = target_x - curr_x
+                #vec_c_y = target_y - curr_y 
+
+                if (vec_A_dy == 0 and vec_B_dx == 0) or (vec_A_dx == 0 and vec_B_dy == 0):
+                    print(f"Corner detected at {path[i+1]}!")
+                    i+=2
+                    smooth_path.append("diagonal_turn")
+                else: 
+                    print(f"Straight line through {path[i+1]}!")
+                    i+=1
+                    smooth_path.append("forward_1")
+
+        return smooth_path
+                # if (curr_x-next_x):
+                #    moveForwardHalf(1) # 1 cell is 180mm^2, The maze is a 16x16 grid made of 18x18 (cm) squares. 
+                #    turnRight45()
+                #    moverForwardHalf(1)
+                #    turnRight45()   
+                #    moveForwardHalf(1) 
+
 # III. SIMULATOR BRIDGE & MOVEMENT
 def log(message):#MMS requires logging to stderr.
     print(message, file=sys.stderr)
@@ -153,6 +221,12 @@ def main():
             #overwrite goal bakc to center for final speed run
             maze.goals = [(7, 7), (7, 8), (8, 7), (8, 8)]
             maze.flood_fill(is_speed_run=True)
+            # Generate the raw coordinates
+            raw_path = maze.get_shortest_path(start = (0,0))
+            #Smooth them into instructions
+
+            speed_run_commands =maze.smooth(raw_path) # error 7/15/2026
+            
             state = "SPEED_RUN"
             
         elif state == "SPEED_RUN" and (x,y) in maze.goals:
