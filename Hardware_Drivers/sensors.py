@@ -104,8 +104,20 @@ def map_and_initialize_vl53(retries_per_sensor=5, boot_delay=0.20, address_commi
 
 # sensor binarization function definition
 def binarize_sensors(distances, threshold=120): #Converts raw mm distances to True/False walls.
+    
     walls = {'L': False, 'F': False, 'R': False}
     if distances[0] is not None and distances[0] < threshold: walls['L'] = True
     if distances[1] is not None and distances[1] < threshold: walls['F'] = True
     if distances[2] is not None and distances[2] < threshold: walls['R'] = True
     return walls
+
+def sensor_mapping(directions_list, heading): # return array
+    # f_dir = directions[heading]
+    # r_dir = directions[(heading + 1) % 4]
+    # l_dir = directions[(heading - 1) % 4]
+    
+    front = directions_list[heading]
+    right = directions_list [(heading+1) % 4]
+    left = directions_list [(heading-1) % 4]
+
+    return directions_list[front, right, left]
