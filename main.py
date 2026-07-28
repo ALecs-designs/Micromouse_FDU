@@ -15,6 +15,10 @@ def update_xy(x, y, heading): # Updates grid coordinates based on the direction 
     return x, y
 
 def main():
+
+    #Testing Flag Declaration
+    testing_flag  = False 
+
     # Controller initialization
     drive_pid = PIDController(kp=1.8, ki=0.01, kd=0.1)
     turn_pid = PIDController(kp=2.5, ki=0.0, kd=0.5) # needs tuning for turning in place
@@ -110,7 +114,7 @@ def main():
                                 print("Hand removed early. Start aborted.")
                                 signal_start_time = None                            
                     
-                    case MouseState.search_goal: # search_goal = 2 
+                    case MouseState.search_goal: 
                         #1-stop motors at center of current cell
                         motors.stop_motors()
                         #2-read and translate sensor readings into true or false (binarization)
@@ -121,26 +125,38 @@ def main():
                         maze.update_wall(x,y,l_dir,walls['L'])
                         #4-check if goal is reached!
                         if (x,y) in maze.goals:
-                            print("Goal reached! Returning to start...")
+                            print("Goal reached! Returning to start or exiting")
+                            
+                            # Testing Flag 
+                            if testing_flag:
+                                exit(1)
+                            
                             # re-define the goal to return to the start cell if the goal is reached.
                             maze.goals = [(0,0)]
+
                             # then you transition states
                             current_state = MouseState.return_to_start
+                            
                             continue
+                        
                         #5-call floodfill
                         maze.flood_fill(is_speed_run=False)
+                        
                         #6-decide the best cell for next move
                         best_dir = maze.get_best_direction(x,y, heading)
-                        #6-execute movement
+                        
+                        #7-execute movement
                         if best_dir == heading:
                             # go straight. Reset encoder to measure the next cell. 
                             encoders.enc_l.steps = 0
+                            
                             # Reset angles to eliminate drift
                             current_angle =0.0
                             target_angle = 0.0
 
                             # Save Context 
                             previous_state = MouseState.search_goal
+                            
                             # transition
                             current_state = MouseState.moving_forward
                         else: 
@@ -237,8 +253,8 @@ def main():
 
 
 
-                    case MouseState.speed_run_turning
-            
+                    #               case MouseState.speed_run_turning:
+                        
 
                     case MouseState.fault:     # Fault = 5
                         print("Critical Fault: Motor Stall Detected. Manual Reset Required.")
