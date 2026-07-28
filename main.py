@@ -1,17 +1,28 @@
+
+
 # I. IMPORTS
 # System imports
 import time
 import sys
+
 # Core Logic Imports (The Brain)
 from Core_Logic import MazeGrid, MouseState, PIDController
+
 # Hardware Drivers Imports (The Muscles & Senses)
-from Hardware_Drivers import encoders, motors, map_and_initialize_vl53, imu, binarize_sensors
+from Hardware_Drivers import encoders, motors, map_and_initialize_vl53, imu, binarize_sensors, sensor_mapping
+
 # II. NAVIGATION
+
 def update_xy(x, y, heading): # Updates grid coordinates based on the direction we just drove.
+
     if heading == 0: return x, y + 1  # North
+    
     elif heading == 1: return x + 1, y  # East
+    
     elif heading == 2: return x, y - 1  # South
+    
     elif heading == 3: return x - 1, y  # West
+    
     return x, y
 
 def main():
@@ -32,8 +43,8 @@ def main():
     # position initialization
     x,y  = 0, 0 
     
-    # heading initialization
-    heading = 0 # 0:N, 1:E, 2:S, 3:W
+    # heading initialization # 0:N, 1:E, 2:S, 3:W
+    heading = 0     
     
     # Target angle initialization
     target_angle = 0.0    
@@ -43,9 +54,12 @@ def main():
     
     # loop duration counter initialization
     last_time = time.perf_counter() # perf_counter() returns a high-resolution timer value
+    
     # Sensor Initializaton
     sensorlist = map_and_initialize_vl53() # returns a list
+    
     print('Sensors initializing... ') 
+    
     if sensorlist is None: # verifies sensor list.
         print("Aborting due to incomplete Vl53 sensor initialization.")
         safe_shutdown()
@@ -57,18 +71,19 @@ def main():
     
     # signal duration counter initialization
     signal_start_time = None # keep track of signal duration
+    
     try:
             # CONTROL LOOP
         while True: 
             
             maze.visited[(x,y)] = True
             
-            # MAP SENSORS
-            f_dir = directions[heading]
-            r_dir = directions[(heading + 1) % 4]
-            l_dir = directions[(heading - 1) % 4]
+            # MAP SENSORS - 0:N, 1:E, 2:S, 3:W
+            f_dir, r_dir, l_dir = sensor_mapping(directions, heading)
+
             now = time.perf_counter()
             dt = now - last_time
+            
             gyro_z = imu.gyro[2]
             current_angle += gyro_z * dt
             error = target_angle - current_angle
